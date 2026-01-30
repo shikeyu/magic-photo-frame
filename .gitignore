@@ -1,0 +1,21 @@
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies (if you add them later)
+node_modules/
+.pnpm-debug.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Trae/AI
+.trae/

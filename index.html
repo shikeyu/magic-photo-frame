@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>魔法相框 Magic Photo Frame</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <h1><span class="magic-icon">🪄</span> <span class="magic-text" data-i18n="title">魔法相框</span></h1>
+        <small class="slogan" data-i18n="slogan">让回忆动起来 ✨</small>
+      </div>
+      <div class="server-config">
+        <button id="langToggleBtn" class="small-btn" style="margin-right: 10px;">EN</button>
+        <label for="serverUrl" data-i18n="label_server_url">ComfyUI 服务地址</label>
+        <input id="serverUrl" type="text" data-i18n-ph="ph_server_url" placeholder="例如：http://127.0.0.1:8188" />
+        <button id="checkServerBtn" data-i18n="btn_check_server">连接检测</button>
+        <button id="diagnoseBtn" data-i18n="btn_diagnose">诊断</button>
+        <span id="serverStatus" class="status" data-i18n="status_unchecked">未检测</span>
+        <div id="diagnostics" class="hint" style="width:100%"></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="workflow">
+        <h2 data-i18n="section_workflow">工作流 JSON</h2>
+        <p class="hint" data-i18n="hint_workflow">
+          将你的 ComfyUI 工作流 JSON 粘贴到此处。可使用占位符 <code>{{IMAGE_FILENAME}}</code>
+          和 <code>{{IMAGE_SUBFOLDER}}</code> 在文件名/子目录字段里，应用会在提交前自动替换。
+          使用 <code>{{PROMPT}}</code> 代表提示词，<code>{{VIDEO_SCALE}}</code> 代表视频分辨率。系统将自动填入自定义或默认值。
+          应用会自动将所有 <code>seed</code> 字段随机化，以保证每次返回不同视频。
+        </p>
+        <div class="workflow-actions" style="margin-bottom: 8px; display: flex; gap: 8px;">
+            <button id="setDefaultWorkflowBtn" class="small-btn" data-i18n="btn_set_default">设为默认</button>
+            <div style="flex: 1;"></div>
+            <button id="importWorkflowBtn" class="secondary-btn" title="支持 JSON/YAML 格式 (Ctrl+I)" data-i18n="btn_import">导入工作流</button>
+            <button id="exportWorkflowBtn" class="secondary-btn" title="导出为 JSON 文件 (Ctrl+E)" data-i18n="btn_export">导出工作流</button>
+            <input type="file" id="importWorkflowInput" accept=".json,.yaml,.yml" style="display: none;" />
+        </div>
+        <textarea id="workflowJson" rows="14" data-i18n-ph="ph_workflow" placeholder="在这里粘贴你的工作流 JSON..."></textarea>
+      </section>
+
+      <section class="uploader">
+        <h2 data-i18n="section_add_file">添加文件</h2>
+        <div class="list-actions" style="margin-bottom: 10px; display: flex; gap: 8px;">
+        <button id="saveListBtn" data-i18n="btn_save_list">保存列表</button>
+        <button id="loadListBtn" data-i18n="btn_load_list">加载列表</button>
+        <input type="file" id="loadListInput" accept=".json" style="display: none;" />
+      </div>
+        <input id="imageInput" type="file" accept="image/*" multiple style="display: none;" />
+        <button id="triggerFileBtn" class="primary-btn" style="width: 100%; margin-bottom: 8px;" data-i18n="btn_select_files">选择文件</button>
+        <div id="imagePreview" class="preview"></div>
+        <button id="generateBtn" disabled data-i18n="btn_generate">生成魔法视频</button>
+        <div class="hint" data-i18n="hint_generate">可添加多张图片并删除不需要的项；生成时会按顺序轮换。按钮会在以下条件全部满足时自动激活：1) 填写 ComfyUI 地址；2) 粘贴有效的工作流 JSON；3) 至少添加一张图片。</div>
+        <div id="progress" class="progress"></div>
+      </section>
+
+      <section class="player">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0;" data-i18n="section_results">视频结果管理</h2>
+            <button id="syncHistoryBtn" class="small-btn" data-i18n="btn_sync_history">同步历史记录</button>
+        </div>
+        <div id="videoResultContainer" class="video-grid-container">
+            <div class="hint-large" data-i18n="hint_results_empty">请点击左侧图片列表中的图片，查看其关联的视频</div>
+        </div>
+      </section>
+
+      <section class="photo-frame-config">
+        <h2 data-i18n="section_config">相框模式设置</h2>
+        <div class="config-grid">
+            <div class="config-item">
+                <label for="pfPhotoDuration" data-i18n="label_photo_duration">照片展示时长 (秒)</label>
+                <input type="number" id="pfPhotoDuration" value="5" min="1" />
+            </div>
+            <div class="config-item">
+                <label for="pfVideoProb" data-i18n="label_video_prob">视频触发概率 (%)</label>
+                <input type="number" id="pfVideoProb" value="10" min="0" max="100" />
+            </div>
+            <div class="config-item">
+                <label for="pfVideoScale" data-i18n="label_video_scale">视频长边分辨率 (240-1024)</label>
+                <input type="number" id="pfVideoScale" value="240" min="240" max="1024" />
+            </div>
+            <div class="config-item">
+                <label for="pfLoopCount" data-i18n="label_loop_count">视频循环次数</label>
+                <input type="number" id="pfLoopCount" value="2" min="1" />
+            </div>
+             <div class="config-item">
+                <label for="pfTransDuration" data-i18n="label_trans_duration">过渡动画时长 (毫秒)</label>
+                <input type="number" id="pfTransDuration" value="1000" min="100" step="100" />
+            </div>
+            <div class="config-item">
+                <label for="pfMaxVideos" data-i18n="label_max_videos">单图最大视频数 (0为不限制)</label>
+                <input type="number" id="pfMaxVideos" value="5" min="0" />
+            </div>
+            <div class="config-item full-width">
+                <label for="pfBgMusic" data-i18n="label_bg_music">背景音乐 URL (可选)</label>
+                <input type="text" id="pfBgMusic" data-i18n-ph="ph_bg_music" placeholder="输入音频文件地址..." />
+            </div>
+            <div class="config-item full-width">
+                <label for="pfDefaultPrompts" data-i18n="label_default_prompts">默认提示词 (每行一个，生成视频时随机选用)</label>
+                <textarea id="pfDefaultPrompts" rows="4" data-i18n-ph="ph_default_prompts" placeholder="例如：让图片动起来，画面生动..."></textarea>
+            </div>
+            <div class="config-item">
+                <label>
+                    <input type="checkbox" id="pfShowClock" checked> <span data-i18n="label_show_clock">显示时钟</span>
+                </label>
+            </div>
+            <div class="config-item">
+                <label>
+                    <input type="checkbox" id="pfAutoGenerate" checked> <span data-i18n="label_auto_generate">自动后台生成视频</span>
+                </label>
+            </div>
+        </div>
+        <div style="margin-top: 16px; display: flex; gap: 8px;">
+            <button id="pfStartBtn" class="primary-btn" style="flex: 1; padding: 12px; font-size: 16px;" data-i18n="btn_start_frame">开启相框模式</button>
+            <button id="pfClearVideosBtn" class="secondary-btn" style="padding: 12px;" title="清除所有已关联的视频，强制重新生成" data-i18n="btn_reset_videos">重置视频状态</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <small data-i18n="footer_hint">
+        提示：如果连接检测失败但在浏览器直接访问 <code>/system_stats</code> 有返回，通常是跨域（CORS）导致。
+        解决方案：以允许跨站的方式启动 ComfyUI。例如：
+        <code>python main.py --listen --port 8188 --enable-cors-header</code>
+        （不同版本参数名可能略有差异，确保响应头包含 <code>Access-Control-Allow-Origin: *</code> 即可）。
+      </small>
+    </footer>
+
+    <div id="cropperModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <h3 data-i18n="modal_crop_title">裁切图片 (需符合 3:4 比例)</h3>
+            <div class="cropper-body">
+                <canvas id="cropperCanvas"></canvas>
+            </div>
+            <div class="modal-actions">
+                <button id="cropCancelBtn" data-i18n="btn_cancel">取消</button>
+                <button id="cropConfirmBtn" class="primary" data-i18n="btn_confirm_crop">确认裁切</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="promptModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <h3 data-i18n="modal_prompt_title">管理自定义提示词</h3>
+            <div id="promptList" class="prompt-list-editor">
+                <!-- Inputs will be added here -->
+            </div>
+            <button id="addPromptBtn" class="small-btn" data-i18n="btn_add_prompt">+ 添加提示词</button>
+            <div class="modal-actions" style="margin-top: 16px;">
+                <button id="promptCancelBtn" data-i18n="btn_cancel">取消</button>
+                <button id="promptConfirmBtn" class="primary" data-i18n="btn_save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="photoFrameContainer" class="photo-frame hidden">
+        <div id="pfLayer1" class="pf-layer"></div>
+        <div id="pfLayer2" class="pf-layer"></div>
+        <div id="pfClock" class="pf-clock hidden">
+            <div class="time"></div>
+            <div class="date"></div>
+        </div>
+        <button id="pfExitBtn" class="pf-exit-btn" title="退出相框模式">×</button>
+    </div>
+
+    <script src="i18n.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
