@@ -70,7 +70,7 @@
     "11": {"inputs": {"purge_cache": true, "purge_models": true, "anything": ["12", 0]}, "class_type": "LayerUtility: PurgeVRAM", "_meta": {"title": "图层工具：清除VRAM"}},
     "12": {"inputs": {"seed": 192054346835137, "steps": 4, "cfg": 1, "sampler_name": "euler_ancestral", "scheduler": "beta", "denoise": 1, "model": ["9", 0], "positive": ["10", 0], "negative": ["10", 1], "latent_image": ["10", 2]}, "class_type": "KSampler", "_meta": {"title": "K采样器"}},
     "13": {"inputs": {"frame_rate": 18, "loop_count": 0, "filename_prefix": "AllInOne01", "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 19, "save_metadata": false, "trim_to_audio": false, "pingpong": false, "save_output": true, "images": ["5", 0]}, "class_type": "VHS_VideoCombine", "_meta": {"title": "合并为视频"}},
-    "72": {"inputs": {"aspect_ratio": "original", "proportional_width": 1, "proportional_height": 1, "fit": "letterbox", "method": "lanczos", "round_to_multiple": "8", "scale_to_side": "shortest", "scale_to_length": "{{VIDEO_SCALE}}", "background_color": "#000000", "image": ["4", 0]}, "class_type": "LayerUtility: ImageScaleByAspectRatio V2", "_meta": {"title": "按宽高比缩放_V2"}}
+    "15": {"inputs": {"aspect_ratio": "original", "proportional_width": 1, "proportional_height": 1, "fit": "letterbox", "method": "lanczos", "round_to_multiple": "8", "scale_to_side": "shortest", "scale_to_length": "{{VIDEO_SCALE}}", "background_color": "#000000", "image": ["4", 0]}, "class_type": "LayerUtility: ImageScaleByAspectRatio V2", "_meta": {"title": "按宽高比缩放_V2"}}
   }`;
 
   const state = {
