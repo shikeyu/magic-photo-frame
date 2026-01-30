@@ -446,13 +446,36 @@
   function clearAllVideosState() {
       if (!confirm(t('msg_confirm_clear_videos'))) return;
       
+      const blocklist = getDeletedBlocklist();
       let count = 0;
+      let blockedCount = 0;
+
       for (const img of state.images) {
-          if (img.videoUrl || (img.videoUrls && img.videoUrls.length > 0)) {
+          const videos = img.videoUrls || [];
+          if (img.videoUrl && !videos.includes(img.videoUrl)) videos.push(img.videoUrl);
+          
+          if (videos.length > 0) {
+              for (const url of videos) {
+                  try {
+                      const u = new URL(url, location.href);
+                      const filename = u.searchParams.get('filename');
+                      if (filename && !blocklist.includes(filename)) {
+                          blocklist.push(filename);
+                          blockedCount++;
+                      }
+                  } catch (e) { console.warn('Parse video url failed', url); }
+              }
+
               img.videoUrl = null;
               img.videoUrls = [];
               count++;
           }
+      }
+      
+      // Save updated blocklist (Keep max 2000 items to prevent overflow)
+      if (blockedCount > 0) {
+          while (blocklist.length > 2000) blocklist.shift();
+          localStorage.setItem('pf_deleted_videos', JSON.stringify(blocklist));
       }
       
       // Also clear cache
@@ -2009,8 +2032,8 @@
       const list = getDeletedBlocklist();
       if (!list.includes(filename)) {
           list.push(filename);
-          // Limit list size to prevent infinite growth? Say 1000 items.
-          if (list.length > 1000) list.shift();
+          // Limit list size to prevent infinite growth? Say 2000 items.
+          if (list.length > 2000) list.shift();
           localStorage.setItem('pf_deleted_videos', JSON.stringify(list));
       }
   }
@@ -2145,6 +2168,14 @@
           const outName = nextOutputFilename(i + 1, total);
           state.pendingOutputName = outName;
           state.pendingOutputSubfolder = 'magicpf';
+          
+          // 如果用户设置了“单图最大视频数”，在手动生成时也检查是否已达上限？
+          // 通常手动点击生成意味着强制生成，所以不检查 maxVideosPerImage 限制。
+          // 但是我们应该尊重“已删除黑名单”吗？手动生成应该允许“复活”吗？
+          // 手动生成产生的新文件名通常是新的（基于时间戳），所以不会被黑名单拦截。
+          // 除非用户在工作流里写死了固定的 filename_prefix 且没有使用 {{OUTPUT_FILENAME}} 占位符。
+          // 默认工作流使用了占位符，所以是安全的。
+
           setProgress(`(${i + 1}/${total}) ${t('msg_progress_prepare')}`);
           const promptObj = prepareWorkflow(workflowText, uploadInfo, item);
 
