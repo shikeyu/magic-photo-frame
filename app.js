@@ -559,17 +559,22 @@
   }
 
   function syncVideosFromHistory(clearFirst = false) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         const base = getBase();
         if (!base) {
             resolve(0);
             return;
         }
 
-        console.log('[PhotoFrame] Syncing videos from history...', { clearFirst });
-        fetch(base + '/history')
-        .then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status))
-        .then(hist => {
+        console.log('[PhotoFrame] Syncing videos from history & browser node...', { clearFirst });
+        
+        try {
+            // Fetch both sources in parallel
+            const [histResult, browserVideos] = await Promise.all([
+                fetch(base + '/history').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+                fetchVideosFromBrowserNode(base)
+            ]);
+
             // If requested, clear existing video data first
             if (clearFirst) {
                 console.log('[PhotoFrame] Clearing existing video data before sync');
@@ -577,22 +582,51 @@
                     img.videoUrls = [];
                     img.videoUrl = null;
                 }
-                // Also clear cache if we are doing a full reset sync? 
-                // Maybe not cache, as cache is useful for reloads. 
-                // But in-memory state is cleared.
             }
 
-            const videos = collectVideosFromHistory(hist);
-            if (!videos.length) {
+            // 1. Collect from History
+            const histVideos = collectVideosFromHistory(histResult);
+            
+            // 2. Merge Browser Videos
+            // Browser videos might duplicate history ones, but 'collectVideosFromHistory' returns objects with ts/filename.
+            // We should merge them. The browser videos have { filename, subfolder, type, ts }.
+            
+            // Create a map to deduplicate by filename
+            const videoMap = new Map();
+            
+            // Add history videos first (usually have better metadata like prompt info, but browser node scans actual files)
+            histVideos.forEach(v => {
+                if (v.filename) videoMap.set(v.filename, v);
+            });
+            
+            // Add browser videos (overwrite or add if missing)
+            // If history has it, it might be better (session info), but browser confirms it exists on disk.
+            // Let's assume if it's in browser node, it exists.
+            browserVideos.forEach(v => {
+                if (v.filename) {
+                    if (!videoMap.has(v.filename)) {
+                         videoMap.set(v.filename, v);
+                    } else {
+                        // If exists, maybe update timestamp if browser one is valid?
+                        // History timestamp is usually creation time. Browser file date might be mod time.
+                        // Let's keep history one if exists as it relates to generation.
+                    }
+                }
+            });
+            
+            const validVideos = Array.from(videoMap.values());
+
+            if (!validVideos.length) {
+                console.log('[PhotoFrame] No videos found in history or browser node.');
                 resolve(0);
                 return;
             }
 
             // Filter out deleted videos
             const blocklist = getDeletedBlocklist();
-            const validVideos = videos.filter(v => !blocklist.includes(v.filename));
+            const filteredVideos = validVideos.filter(v => !blocklist.includes(v.filename));
             
-            if (!validVideos.length) {
+            if (!filteredVideos.length) {
                 resolve(0);
                 return;
             }
@@ -611,9 +645,14 @@
                 const prefix = derivePrefixFromImageName(img.name);
                 // Search for ALL videos with this prefix
                 
-                const matches = validVideos.filter(v => 
-                    v.filename && (v.filename.startsWith('magicpf/' + prefix) || v.filename.startsWith(prefix))
-                );
+                // Match logic: Check if video basename starts with prefix
+                // This handles different subfolder structures (e.g. magicpf/Prefix... or magicpf/magicpf/Prefix...)
+                const matches = filteredVideos.filter(v => {
+                    if (!v.filename) return false;
+                    const parts = v.filename.split(/[/\\]/);
+                    const basename = parts[parts.length - 1];
+                    return basename.startsWith(prefix);
+                });
 
                 if (matches.length > 0) {
                     let newFound = 0;
@@ -634,12 +673,18 @@
                 }
             }
             console.log(`[PhotoFrame] Sync complete. Found ${matchedCount} new video instances.`);
+            
+            if (matchedCount === 0 && validVideos.length > 0) {
+                 console.log('[PhotoFrame] No matches found. Sample available videos:', validVideos.map(v => v.filename).slice(0, 5));
+                 console.log('[PhotoFrame] Sample image prefixes:', state.images.map(i => derivePrefixFromImageName(i.name)).slice(0, 5));
+            }
+
             resolve(matchedCount);
-        })
-        .catch(e => {
-            console.warn('[PhotoFrame] Sync history failed', e);
+
+        } catch (e) {
+            console.warn('[PhotoFrame] Sync failed', e);
             reject(e);
-        });
+        }
     });
   }
 
@@ -1365,15 +1410,31 @@
       const t0 = performance.now();
       const r = await fetch(base + '/system_stats');
       const latency = Math.round(performance.now() - t0);
+      
+      // Check ComfyUI-Browser
+      let browserStatus = 'unknown';
+      try {
+          // Add random param to avoid cache
+          const b = await fetch(base + '/browser/config?_=' + Date.now()); 
+          if (b.ok) browserStatus = 'installed';
+          else if (b.status === 404) browserStatus = 'not_installed';
+          else browserStatus = 'error_' + b.status;
+      } catch (e) { 
+          browserStatus = 'connect_fail'; 
+          console.warn('[Diagnose] Browser check fail', e);
+      }
+      
+      console.log('[Diagnose] ComfyUI-Browser Status:', browserStatus);
+
       if (!r.ok) {
         const text = await safeReadText(r);
         setStatus(`${t('msg_service_unavailable')} (HTTP ${r.status})`, 'err');
-        showDiagnostics({ ok:false, status:r.status, text, latency });
+        showDiagnostics({ ok:false, status:r.status, text, latency, browserStatus });
         return;
       }
       const data = await r.json();
       setStatus(t('msg_diagnose_success'), 'ok');
-      showDiagnostics({ ok:true, status:200, data, latency });
+      showDiagnostics({ ok:true, status:200, data, latency, browserStatus });
     } catch (err) {
       const msg = (err?.message || '').toLowerCase();
       const maybeCors = msg.includes('failed to fetch') || msg.includes('cors');
@@ -2810,6 +2871,93 @@
       if (signatureFor(v) !== last) return v;
     }
     return list[0];
+  }
+
+  async function fetchVideosFromBrowserNode(base) {
+      console.log('[PhotoFrame] fetchVideosFromBrowserNode CALLED'); 
+      // Try to use ComfyUI-Browser API to list files in output/magicpf
+      // Endpoint: /browser/files?folder_type=outputs&subfolder=magicpf
+      try {
+          // Queue of folders to scan: { path: 'magicpf', depth: 0 }
+          const queue = [
+              { path: 'magicpf', depth: 0 }
+          ];
+          
+          let allFiles = [];
+          const MAX_DEPTH = 2; // Prevent deep recursion
+          const MAX_REQUESTS = 50; // Safety limit
+          let requestCount = 0;
+          
+          const processedPaths = new Set();
+
+          while (queue.length > 0) {
+              if (requestCount >= MAX_REQUESTS) {
+                  console.warn('[PhotoFrame] Browser scan limit reached, stopping recursion.');
+                  break;
+              }
+
+              const { path, depth } = queue.shift();
+              if (processedPaths.has(path)) continue;
+              processedPaths.add(path);
+
+              requestCount++;
+              const url = `${base}/browser/files?folder_type=outputs&subfolder=${encodeURIComponent(path)}`;
+              console.log(`[PhotoFrame] Scanning Browser Node (${requestCount}): ${path}`);
+              
+              try {
+                  const r = await fetch(url);
+                  if (!r.ok) continue;
+                  
+                  const data = await r.json();
+                  if (!data || !Array.isArray(data.files)) continue;
+
+                  for (const f of data.files) {
+                      const name = f.name || f.filename;
+                      if (!name) continue;
+
+                      // Check if directory
+                      // ComfyUI-Browser usually marks dirs with type: 'dir'
+                      // Or sometimes we rely on missing extension?
+                      // Let's rely on type === 'dir' or 'folder_path' existence
+                      const isDir = f.type === 'dir' || f.folder_path;
+                      
+                      if (isDir) {
+                          if (depth < MAX_DEPTH) {
+                              // Construct subpath. 
+                              // If 'path' is 'magicpf' and name is '2023-01-01', new path is 'magicpf/2023-01-01'
+                              const subPath = path + '/' + name;
+                              queue.push({ path: subPath, depth: depth + 1 });
+                          }
+                      } else {
+                          // File
+                          if (/\.(mp4|gif|webm)$/i.test(name)) {
+                              let finalName = name;
+                              // Ensure full path prefix
+                              if (!name.includes('/') && !name.includes('\\')) {
+                                  finalName = path + '/' + name;
+                              }
+                              
+                              allFiles.push({
+                                  filename: finalName,
+                                  subfolder: path, // Use the path we scanned as subfolder
+                                  type: 'output',
+                                  ts: f.date || f.created || f.created_at || 0
+                              });
+                          }
+                      }
+                  }
+
+              } catch (e) {
+                  console.warn(`[PhotoFrame] Failed to scan ${path}`, e);
+              }
+          }
+
+          console.log(`[PhotoFrame] Fetched ${allFiles.length} videos from ComfyUI-Browser node (scanned ${requestCount} folders)`);
+          return allFiles;
+      } catch (e) {
+          console.error('[PhotoFrame] Fetch from Browser Node failed', e);
+          return [];
+      }
   }
 
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
