@@ -346,7 +346,6 @@
             if (val) newPrompts.push(val);
         });
         img.prompts = newPrompts;
-        console.log('Saved prompts for', img.name, newPrompts);
     }
     closePromptModal();
   }
@@ -368,7 +367,6 @@
       els.photoFrameContainer.addEventListener('click', (e) => {
           if (e.target === els.pfExitBtn) return; // Ignore exit button
           if (!state.photoFrame.active) return;
-          console.log('[PhotoFrame] Manual skip (click)');
           pickNextPhoto();
       });
 
@@ -376,7 +374,6 @@
       document.addEventListener('keydown', (e) => {
           if (!state.photoFrame.active) return;
           if (e.key === 'ArrowRight' || e.key === ' ') { // Right or Space to next
-              console.log('[PhotoFrame] Manual skip (key)');
               pickNextPhoto();
           }
       });
@@ -565,8 +562,6 @@
             resolve(0);
             return;
         }
-
-        console.log('[PhotoFrame] Syncing videos from history & browser node...', { clearFirst });
         
         try {
             // Fetch both sources in parallel
@@ -577,7 +572,6 @@
 
             // If requested, clear existing video data first
             if (clearFirst) {
-                console.log('[PhotoFrame] Clearing existing video data before sync');
                 for (const img of state.images) {
                     img.videoUrls = [];
                     img.videoUrl = null;
@@ -617,7 +611,6 @@
             const validVideos = Array.from(videoMap.values());
 
             if (!validVideos.length) {
-                console.log('[PhotoFrame] No videos found in history or browser node.');
                 resolve(0);
                 return;
             }
@@ -668,15 +661,8 @@
                         matchedCount += newFound;
                         // Update legacy field for compatibility (use latest)
                         img.videoUrl = img.videoUrls[img.videoUrls.length - 1];
-                        console.log(`[PhotoFrame] Synced ${newFound} videos for ${img.name}`);
                     }
                 }
-            }
-            console.log(`[PhotoFrame] Sync complete. Found ${matchedCount} new video instances.`);
-            
-            if (matchedCount === 0 && validVideos.length > 0) {
-                 console.log('[PhotoFrame] No matches found. Sample available videos:', validVideos.map(v => v.filename).slice(0, 5));
-                 console.log('[PhotoFrame] Sample image prefixes:', state.images.map(i => derivePrefixFromImageName(i.name)).slice(0, 5));
             }
 
             resolve(matchedCount);
@@ -770,7 +756,6 @@
         isForced = true;
         // Immediately clear the flag to prevent it from sticking if timer is cancelled (e.g. manual skip)
         state.images[forceIdx].forcePlayVideo = false;
-        console.log('[PhotoFrame] Picking newly generated video item:', nextIndex);
     } 
     // 2. 否则，尝试提高“有视频图片”的选中概率 (70% 概率优先从有视频的集合中选)
     else {
@@ -817,10 +802,6 @@
     state.photoFrame.timer = setTimeout(() => {
         if (!state.photoFrame.active) return;
         
-        if (isForced) {
-            console.log('[PhotoFrame] Force playing video for:', item.name);
-        }
-
         // Check if has video (support array or single)
         const hasVideo = (item.videoUrls && item.videoUrls.length > 0) || item.videoUrl;
 
@@ -863,7 +844,7 @@
         let src = item.videoUrl;
         if (item.videoUrls && item.videoUrls.length > 0) {
             src = item.videoUrls[Math.floor(Math.random() * item.videoUrls.length)];
-            console.log(`[PhotoFrame] Playing 1 of ${item.videoUrls.length} videos for ${item.name}:`, src);
+
         }
 
         contentEl.src = src;
@@ -880,7 +861,6 @@
             
             // If video fails (e.g. 404 deleted), clear it so it can be regenerated
             if (item.videoUrl) {
-                console.log('[PhotoFrame] Clearing invalid videoUrl for', item.name);
                 item.videoUrl = null;
                 // Also remove from cache
                 try {
@@ -955,8 +935,6 @@
     ];
     const effect = forcedEffect || effects[Math.floor(Math.random() * effects.length)];
     // const effect = 'flip'; // Debug
-
-    console.log('[PhotoFrame] Transition:', effect);
 
     if (effect === 'fade') {
         // Default crossfade
@@ -1054,7 +1032,6 @@
     
     // Check config flag
     if (state.photoFrame.config.autoGenerate === false) {
-        console.log('[PhotoFrame] Background generation disabled by config');
         return;
     }
 
@@ -1064,8 +1041,6 @@
         return;
     }
 
-    console.log('[PhotoFrame] Starting background generation loop...');
-    
     // Simple scheduler loop
     const scheduleNext = () => {
       if (!state.photoFrame.active) return;
@@ -1084,7 +1059,6 @@
 
       // If main thread is busy generating (e.g. user clicked generate), skip
       if (els.generateBtn.disabled) {
-        console.log('[PhotoFrame] BG Gen: Main thread busy, skipping');
         scheduleNext();
         return;
       }
@@ -1094,7 +1068,6 @@
 
       const workflowText = els.workflowJson.value.trim();
       if (!workflowText) { 
-          console.log('[PhotoFrame] BG Gen: No workflow, skipping');
           scheduleNext(); return; 
       }
 
@@ -1110,11 +1083,9 @@
               const count = (img.videoUrls ? img.videoUrls.length : 0) + (img.videoUrl && (!img.videoUrls || !img.videoUrls.includes(img.videoUrl)) ? 1 : 0);
               return count < maxV;
           });
-          console.log(`[PhotoFrame] BG Gen: Checking limits (Max ${maxV}). Candidates ${candidates.length} / ${state.images.length}`);
       } else {
           // If max is 0 (unlimited), all images are candidates
           candidates = state.images;
-          console.log(`[PhotoFrame] BG Gen: Unlimited mode. All ${candidates.length} images are candidates.`);
       }
 
       if (candidates.length === 0) {
@@ -1128,8 +1099,6 @@
       try {
         // Step 1: Check cache (Skip check, always generate if candidate selected)
         // Step 2: Check history (Skip check, always generate if candidate selected)
-        
-        console.log('[PhotoFrame] Background generating for:', item.name);
         
         // Mark main thread as busy to prevent user interaction conflict?
         // Ideally we should independent, but sharing 'state.isGenerating' might conflict.
@@ -1196,7 +1165,6 @@
        
        item.forcePlayVideo = true; // 标记为优先播放
        saveVideoInfoToCache(item.name, result);
-       console.log('[PhotoFrame] Video generated for', item.name, videoUrl);
     }
   }
   
@@ -1424,8 +1392,6 @@
           console.warn('[Diagnose] Browser check fail', e);
       }
       
-      console.log('[Diagnose] ComfyUI-Browser Status:', browserStatus);
-
       if (!r.ok) {
         const text = await safeReadText(r);
         setStatus(`${t('msg_service_unavailable')} (HTTP ${r.status})`, 'err');
@@ -1511,7 +1477,7 @@
         finalFile = await checkAndCropImage(file);
       } catch (e) {
         // User cancelled or error
-        console.log('Image add cancelled or failed', e);
+        console.warn('Image add cancelled or failed', e);
         resolve();
         return;
       }
@@ -2329,10 +2295,7 @@
       const r = await fetch(base + '/history/' + promptId);
       if (!r.ok) { console.warn('[onPromptFinished] history HTTP', r.status); setProgress(t('msg_progress_failed')); return; }
       const hist = await r.json();
-      const keys = Object.keys(hist || {});
-      console.log('[onPromptFinished] history entries', { base, promptId, entries: keys.length });
       const videos = collectVideosFromHistory(hist);
-      console.log('[onPromptFinished] videos', { count: videos.length, sample: videos.slice(0, 3).map(v => v.filename) });
       if (!videos.length) { setProgress(t('msg_progress_failed') + ': No video in history'); return; }
       videos.sort((a, b) => {
         const ta = a.ts || 0, tb = b.ts || 0;
@@ -2343,7 +2306,6 @@
       });
       const picked = pickNextUnique(videos) || videos[0];
       const url = buildViewUrl(base, picked);
-      console.log('[onPromptFinished] pick', { filename: picked.filename, type: picked.type, subfolder: picked.subfolder, ts: picked.ts });
       showResult(url, picked);
       setProgress(t('msg_progress_success'));
     } catch (err) {
@@ -2360,11 +2322,9 @@
       // 无最近ID时，直接从全量历史中查找最新视频
       try {
         setProgress(t('msg_checking'));
-        console.log('[onRefreshLastResult] no promptId, using all history', { base });
         const latest = await fetchLatestVideoFromAllHistory(base);
         if (latest) {
           const url = buildViewUrl(base, latest);
-          console.log('[onRefreshLastResult] latest-from-all', { filename: latest.filename, type: latest.type, subfolder: latest.subfolder, ts: latest.ts });
           showResult(url, latest);
           setProgress(t('msg_progress_success'));
         } else {
@@ -2378,20 +2338,16 @@
     }
     try {
       setProgress(t('msg_progress_waiting'));
-      console.log('[onRefreshLastResult] with promptId', { base, promptId: pid });
       const result = await pollHistoryForVideo(base, pid, { timeoutMs: 15000, intervalMs: 1200 });
       if (result) {
         const videoUrl = buildViewUrl(base, result);
-        console.log('[onRefreshLastResult] poll-picked', { filename: result.filename, type: result.type, subfolder: result.subfolder, ts: result.ts });
         showResult(videoUrl, result);
         setProgress(t('msg_progress_success'));
       } else {
         // 回退：从全量历史中寻找最新视频
-        console.log('[onRefreshLastResult] poll missed, fallback to all history');
         const latest = await fetchLatestVideoFromAllHistory(base);
         if (latest) {
           const url = buildViewUrl(base, latest);
-          console.log('[onRefreshLastResult] fallback-picked', { filename: latest.filename, type: latest.type, subfolder: latest.subfolder, ts: latest.ts });
           showResult(url, latest);
           setProgress(t('msg_progress_success'));
         } else {
@@ -2410,7 +2366,6 @@
     state.lastProgressText = text;
     // 当提示从“生成中，等待结果...”变更为其他内容时，主动尝试刷新一次结果以防漏检
     if (prev.includes(t('msg_progress_waiting')) && text !== prev) {
-      console.log('[setProgress] progress changed, trigger refresh', { prev, next: text });
       // 异步触发，避免与当前流程竞争
       setTimeout(() => {
         try { onRefreshLastResult(); } catch (e) { console.warn('[setProgress] onRefreshLastResult error', e); }
@@ -2574,10 +2529,6 @@
         const r = await fetch(base + '/history/' + promptId + '?t=' + Date.now());
         if (r.ok) {
           hist = await r.json();
-          const keys = Object.keys(hist || {});
-          console.log('[pollHistoryForVideo] OK', { base, promptId, attempt, entries: keys.length });
-        } else {
-          console.log('[pollHistoryForVideo] HTTP', { status: r.status, attempt });
         }
       } catch (err) {
         // 网络/CORS问题，等待后重试
@@ -2585,22 +2536,18 @@
       }
       if (hist) {
         const videos = collectVideosFromHistory(hist);
-        console.log('[pollHistoryForVideo] videos collected', { attempt, count: videos.length, sample: videos.slice(0, 3).map(v => v.filename) });
         if (videos.length > 0) {
           const pref = state.currentExpectedPrefix || '';
           let candidates = videos;
           if (pref) {
             const byPref = videos.filter(v => typeof v.filename === 'string' && v.filename.startsWith(pref));
-            console.log('[pollHistoryForVideo] prefix filter', { prefix: pref, matched: byPref.length });
             if (byPref.length > 0) candidates = byPref;
           }
           candidates.sort((a, b) => (b.ts || 0) - (a.ts || 0));
           const picked = pickNextUnique(candidates);
           if (picked) {
-            console.log('[pollHistoryForVideo] picked', { attempt, filename: picked.filename, type: picked.type, subfolder: picked.subfolder, ts: picked.ts });
             return picked;
           }
-          console.log('[pollHistoryForVideo] fallback to first', { attempt, filename: candidates[0].filename });
           return candidates[0];
         }
       }
@@ -2613,7 +2560,6 @@
     const out = [];
     try {
       const entries = Object.values(hist || {});
-      console.log('[collectVideosFromHistory] entries', { count: entries.length });
       for (const entry of entries) {
         const ts = extractEntryTimestamp(entry);
         const nodes = entry?.outputs ? Object.values(entry.outputs) : [];
@@ -2644,7 +2590,6 @@
     } catch (err) {
       console.warn('解析历史失败', err);
     }
-    console.log('[collectVideosFromHistory] videos', { count: out.length, sample: out.slice(0, 3).map(v => v.filename) });
     return out;
   }
 
@@ -2685,7 +2630,6 @@
       // 当存在期望前缀时，优先筛选该前缀
       const pref = state.currentExpectedPrefix || '';
       const candidates = pref ? videos.filter(v => typeof v.filename === 'string' && v.filename.startsWith(pref)) : videos;
-      console.log('[fetchLatestVideoFromAllHistory] prefix filter', { prefix: pref, total: videos.length, matched: candidates.length });
       // 排序规则：ts 降序 > 数字后缀降序 > 日期打分降序
       candidates.sort((a, b) => {
         const ta = a.ts || 0, tb = b.ts || 0;
@@ -2696,7 +2640,6 @@
       });
       const picked = pickNextUnique(candidates);
       const chosen = picked || candidates[0];
-      console.log('[fetchLatestVideoFromAllHistory]', { base, total: videos.length, matched: candidates.length, chosen: chosen?.filename, type: chosen?.type, subfolder: chosen?.subfolder, ts: chosen?.ts });
       return chosen;
     } catch (err) {
       console.warn('[fetchLatestVideoFromAllHistory] error', err);
@@ -2729,7 +2672,6 @@
       type: videoInfo.type || 'output',
     });
     const url = base + '/view?' + params.toString();
-    console.log('[buildViewUrl]', { url, filename: videoInfo.filename, type: videoInfo.type, subfolder: videoInfo.subfolder });
     // Append timestamp to force reload in video element
     return url + '&t=' + Date.now();
   }
@@ -2777,7 +2719,6 @@
       if (nb !== na) return nb - na;
       return scoreFilenameRecency(b.filename) - scoreFilenameRecency(a.filename);
     });
-    console.log('[findByPrefixFromHistory]', { prefix, candidates: list.length, top: list[0]?.filename });
     return list[0];
   }
 
@@ -2806,8 +2747,6 @@
 
   function showResult(videoUrl, meta) {
     const sig = signatureFor(meta);
-    // const isRepeat = state.lastShownSig && sig === state.lastShownSig;
-    console.log('[showResult]', { url: videoUrl, filename: meta?.filename, type: meta?.type, subfolder: meta?.subfolder, ts: meta?.ts });
     
     // Find matching image(s) and update state
     let updated = false;
@@ -2874,17 +2813,18 @@
   }
 
   async function fetchVideosFromBrowserNode(base) {
-      console.log('[PhotoFrame] fetchVideosFromBrowserNode CALLED'); 
       // Try to use ComfyUI-Browser API to list files in output/magicpf
       // Endpoint: /browser/files?folder_type=outputs&subfolder=magicpf
       try {
           // Queue of folders to scan: { path: 'magicpf', depth: 0 }
+          // User specified 'magicpf' is the target directory relative to 'output'
+          // Using 'folder_path' parameter as 'subfolder' seems to be ignored by some browser node versions
           const queue = [
-              { path: 'magicpf', depth: 0 }
+              { path: 'magicpf', depth: 0 } 
           ];
           
           let allFiles = [];
-          const MAX_DEPTH = 2; // Prevent deep recursion
+          const MAX_DEPTH = 3; // Prevent deep recursion
           const MAX_REQUESTS = 50; // Safety limit
           let requestCount = 0;
           
@@ -2897,16 +2837,22 @@
               }
 
               const { path, depth } = queue.shift();
-              if (processedPaths.has(path)) continue;
-              processedPaths.add(path);
+              // Normalize path: remove leading/trailing slashes
+              const normPath = path.replace(/^\/+|\/+$/g, '');
+              
+              if (processedPaths.has(normPath)) continue;
+              processedPaths.add(normPath);
 
               requestCount++;
-              const url = `${base}/browser/files?folder_type=outputs&subfolder=${encodeURIComponent(path)}`;
-              console.log(`[PhotoFrame] Scanning Browser Node (${requestCount}): ${path}`);
+              // ComfyUI-Browser API: use 'folder_path' to specify directory
+              const url = `${base}/browser/files?folder_type=outputs&folder_path=${encodeURIComponent(normPath)}`;
               
               try {
                   const r = await fetch(url);
-                  if (!r.ok) continue;
+                  if (!r.ok) {
+                      console.warn(`[PhotoFrame] Scan failed for ${normPath}: ${r.status}`);
+                      continue;
+                  }
                   
                   const data = await r.json();
                   if (!data || !Array.isArray(data.files)) continue;
@@ -2916,30 +2862,27 @@
                       if (!name) continue;
 
                       // Check if directory
-                      // ComfyUI-Browser usually marks dirs with type: 'dir'
-                      // Or sometimes we rely on missing extension?
-                      // Let's rely on type === 'dir' or 'folder_path' existence
-                      const isDir = f.type === 'dir' || f.folder_path;
+                      const isDir = f.type === 'dir';
                       
                       if (isDir) {
                           if (depth < MAX_DEPTH) {
                               // Construct subpath. 
-                              // If 'path' is 'magicpf' and name is '2023-01-01', new path is 'magicpf/2023-01-01'
-                              const subPath = path + '/' + name;
+                              // ComfyUI-Browser returns just the folder name in 'name'
+                              const subPath = normPath + '/' + name;
                               queue.push({ path: subPath, depth: depth + 1 });
                           }
                       } else {
                           // File
                           if (/\.(mp4|gif|webm)$/i.test(name)) {
                               let finalName = name;
-                              // Ensure full path prefix
+                              // Ensure full path prefix relative to output
                               if (!name.includes('/') && !name.includes('\\')) {
-                                  finalName = path + '/' + name;
+                                  finalName = normPath + '/' + name;
                               }
                               
                               allFiles.push({
                                   filename: finalName,
-                                  subfolder: path, // Use the path we scanned as subfolder
+                                  subfolder: normPath,
                                   type: 'output',
                                   ts: f.date || f.created || f.created_at || 0
                               });
@@ -2948,11 +2891,10 @@
                   }
 
               } catch (e) {
-                  console.warn(`[PhotoFrame] Failed to scan ${path}`, e);
+                  console.warn(`[PhotoFrame] Failed to scan ${normPath}`, e);
               }
           }
 
-          console.log(`[PhotoFrame] Fetched ${allFiles.length} videos from ComfyUI-Browser node (scanned ${requestCount} folders)`);
           return allFiles;
       } catch (e) {
           console.error('[PhotoFrame] Fetch from Browser Node failed', e);
@@ -2961,4 +2903,5 @@
   }
 
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+})();
 })();

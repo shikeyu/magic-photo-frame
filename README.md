@@ -24,6 +24,7 @@
         *   ComfyUI-VideoHelperSuite (VHS)
         *   ComfyUI-LayerStyle (LayerUtility)
         *   WanVideo 相关节点 (WanImageToVideo)
+        *   **ComfyUI-Browser** (用于历史记录同步与文件管理)
 *   **打开应用**：在浏览器中打开 `index.html`（建议使用本地服务器运行，如 `python -m http.server`）。
 
 ### 2. 连接服务

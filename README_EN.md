@@ -24,6 +24,7 @@
         *   ComfyUI-VideoHelperSuite (VHS)
         *   ComfyUI-LayerStyle (LayerUtility)
         *   WanVideo Related Nodes (WanImageToVideo)
+        *   **ComfyUI-Browser** (For history sync and file management)
 *   **Open Application**: Open `index.html` in your browser (it is recommended to run it using a local server, e.g., `python -m http.server`).
 
 ### 2. Connect Service
