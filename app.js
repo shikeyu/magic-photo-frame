@@ -581,29 +581,42 @@
             // 1. Collect from History
             const histVideos = collectVideosFromHistory(histResult);
             
-            // 2. Merge Browser Videos
-            // Browser videos might duplicate history ones, but 'collectVideosFromHistory' returns objects with ts/filename.
-            // We should merge them. The browser videos have { filename, subfolder, type, ts }.
+            // 2. Verify existence
+            // Videos in browserVideos are confirmed to exist.
+            // Videos in histVideos need to be verified if they are not in browserVideos.
+            const browserFilenames = new Set(browserVideos.map(v => v.filename).filter(Boolean));
             
-            // Create a map to deduplicate by filename
+            // Deduplicate candidates to verify
+            const toVerifyMap = new Map();
+            histVideos.forEach(v => {
+                if (v.filename && !browserFilenames.has(v.filename)) {
+                    toVerifyMap.set(v.filename, v);
+                }
+            });
+            
+            const verifiedHistList = await verifyFilesExistence(base, Array.from(toVerifyMap.values()));
+            const verifiedHistSet = new Set(verifiedHistList.map(v => v.filename));
+
+            // 3. Merge and Deduplicate
             const videoMap = new Map();
             
-            // Add history videos first (usually have better metadata like prompt info, but browser node scans actual files)
+            // Add confirmed history videos
             histVideos.forEach(v => {
-                if (v.filename) videoMap.set(v.filename, v);
+                if (v.filename) {
+                    if (browserFilenames.has(v.filename) || verifiedHistSet.has(v.filename)) {
+                        // Only add if not already added (prioritize first occurrence or latest?)
+                        // collectVideosFromHistory doesn't sort.
+                        // Let's just set it.
+                        videoMap.set(v.filename, v);
+                    }
+                }
             });
             
             // Add browser videos (overwrite or add if missing)
-            // If history has it, it might be better (session info), but browser confirms it exists on disk.
-            // Let's assume if it's in browser node, it exists.
             browserVideos.forEach(v => {
                 if (v.filename) {
                     if (!videoMap.has(v.filename)) {
                          videoMap.set(v.filename, v);
-                    } else {
-                        // If exists, maybe update timestamp if browser one is valid?
-                        // History timestamp is usually creation time. Browser file date might be mod time.
-                        // Let's keep history one if exists as it relates to generation.
                     }
                 }
             });
@@ -671,6 +684,34 @@
             console.warn('[PhotoFrame] Sync failed', e);
             reject(e);
         }
+    });
+  }
+
+  function verifyFilesExistence(base, videos) {
+    return new Promise(async (resolve) => {
+        const results = [];
+        const limit = 10; // Concurrency limit
+        const chunked = [];
+        
+        for (let i = 0; i < videos.length; i += limit) {
+            chunked.push(videos.slice(i, i + limit));
+        }
+
+        for (const chunk of chunked) {
+            const promises = chunk.map(async (v) => {
+                const url = buildViewUrl(base, v);
+                try {
+                    const r = await fetch(url, { method: 'HEAD' });
+                    if (r.ok) return v;
+                } catch (e) {
+                    // console.warn('Verify failed', url);
+                }
+                return null;
+            });
+            const res = await Promise.all(promises);
+            results.push(...res.filter(x => x));
+        }
+        resolve(results);
     });
   }
 
@@ -1058,7 +1099,7 @@
       }
 
       // If main thread is busy generating (e.g. user clicked generate), skip
-      if (els.generateBtn.disabled) {
+      if (state.isGenerating) {
         scheduleNext();
         return;
       }
@@ -1066,30 +1107,48 @@
       const base = getBase();
       if (!base) { scheduleNext(); return; }
 
+      // --- New Logic: Check ComfyUI Status & Sync First ---
+
+      try {
+          // 1. Check ComfyUI Queue Status
+          // Only proceed if ComfyUI is completely idle (no pending, no running)
+          const isIdle = await checkComfyUIIdle(base);
+          if (!isIdle) {
+              // ComfyUI is busy, wait and retry later
+              // console.log('[PhotoFrame] ComfyUI is busy, skipping auto-generation');
+              state.photoFrame.bgTimer = setTimeout(bgGenStep, 5000); // Check again in 5s
+              return;
+          }
+
+          // 2. Sync History to ensure we have the latest video counts
+          // This prevents generating duplicates if a previous job finished but wasn't synced yet
+          await syncVideosFromHistory();
+
+      } catch (e) {
+          console.warn('[PhotoFrame] Pre-check failed:', e);
+          scheduleNext();
+          return;
+      }
+
+      // 3. Re-evaluate candidates
       const workflowText = els.workflowJson.value.trim();
       if (!workflowText) { 
           scheduleNext(); return; 
       }
-
-      // Find candidate
-      // Default: find one that hasn't reached max video limit
       
       let candidates = [];
       const maxV = state.photoFrame.config.maxVideosPerImage || 0;
 
-      // Always behave like ForceRegenerate is ON, but respect max limit
       if (maxV > 0) {
           candidates = state.images.filter(img => {
               const count = (img.videoUrls ? img.videoUrls.length : 0) + (img.videoUrl && (!img.videoUrls || !img.videoUrls.includes(img.videoUrl)) ? 1 : 0);
               return count < maxV;
           });
       } else {
-          // If max is 0 (unlimited), all images are candidates
           candidates = state.images;
       }
 
       if (candidates.length === 0) {
-        // Nothing to do
         scheduleNext();
         return; 
       }
@@ -1097,15 +1156,7 @@
       const item = candidates[Math.floor(Math.random() * candidates.length)];
       
       try {
-        // Step 1: Check cache (Skip check, always generate if candidate selected)
-        // Step 2: Check history (Skip check, always generate if candidate selected)
-        
-        // Mark main thread as busy to prevent user interaction conflict?
-        // Ideally we should independent, but sharing 'state.isGenerating' might conflict.
-        // runSingleGenerationSilent handles its own logic.
-        
         await runSingleGenerationSilent(base, workflowText, item);
-        
       } catch (err) {
         console.error('[PhotoFrame] Background Gen Error:', err);
       }
@@ -1115,6 +1166,33 @@
 
     // Kick off
     scheduleNext();
+  }
+
+  async function checkComfyUIIdle(base) {
+      try {
+          // Try /queue endpoint first (provides detailed running/pending info)
+          const r = await fetch(base + '/queue');
+          if (r.ok) {
+              const data = await r.json();
+              const pending = data.queue_pending ? data.queue_pending.length : 0;
+              const running = data.queue_running ? data.queue_running.length : 0;
+              return pending === 0 && running === 0;
+          }
+      } catch {}
+
+      try {
+          // Fallback to /prompt endpoint
+          const r = await fetch(base + '/prompt');
+          if (r.ok) {
+              const data = await r.json();
+              const remaining = data.exec_info ? data.exec_info.queue_remaining : 0;
+              return remaining === 0;
+          }
+      } catch {}
+
+      // If checks fail, assume not idle to be safe? Or true? 
+      // Assume busy to prevent spamming if server is down/unreachable
+      return false;
   }
 
   async function runSingleGenerationSilent(base, workflowText, item) {
@@ -1154,7 +1232,9 @@
     // However, pollHistoryForVideo calls fetch with `?t=`.
     // We can reuse it.
     
-    const result = await pollHistoryForVideo(base, promptId, { silent: true });
+    const prefix = derivePrefixFromImageName(uploadInfo.filename);
+    // Increase timeout for background generation to 20 minutes to handle slow models
+    const result = await pollHistoryForVideo(base, promptId, { silent: true, expectedPrefix: prefix, timeoutMs: 1200000 });
     
     if (result) {
        const videoUrl = buildViewUrl(base, result);
@@ -2220,7 +2300,7 @@
           }
   
           setProgress(`(${i + 1}/${total}) ${t('msg_progress_waiting')}`);
-          const result = await pollHistoryForVideo(base, promptId);
+          const result = await pollHistoryForVideo(base, promptId, { expectedPrefix: state.currentExpectedPrefix });
   
           if (result) {
             const videoUrl = buildViewUrl(base, result);
@@ -2267,14 +2347,46 @@
     if (!base) return;
     const wsUrl = toWsUrl(base);
     if (!wsUrl) return;
-    // 如果已有且地址一致，则不重复连接
-    if (state.ws && state.wsBase === base && state.wsConnected) return;
-    try { if (state.ws) { state.ws.close(); state.ws = null; state.wsConnected = false; } } catch {}
+    
+    // Check if we have a valid active connection to the same base
+    if (state.ws && state.wsBase === base && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
+    // Close existing if any (e.g. different base or closed/closing but object exists)
+    try { 
+        if (state.ws) {
+            // Prevent old socket from triggering reconnect if we are manually replacing it
+            state.ws.onclose = null; 
+            state.ws.close(); 
+        }
+    } catch {}
+    
+    state.ws = null;
+    state.wsConnected = false;
+
     const ws = new WebSocket(wsUrl);
-    state.ws = ws; state.wsBase = base; state.wsConnected = false;
-    ws.onopen = () => { state.wsConnected = true; };
-    ws.onclose = () => { state.wsConnected = false; };
-    ws.onerror = () => { state.wsConnected = false; };
+    state.ws = ws; 
+    state.wsBase = base;
+    
+    ws.onopen = () => { 
+        // console.log('[WS] Connected');
+        state.wsConnected = true; 
+    };
+    
+    ws.onclose = (e) => { 
+        state.wsConnected = false;
+        // Only reconnect if this socket is still the 'current' one intended for state.baseUrl
+        // and we haven't manually switched to another server.
+        if (state.ws === ws && state.baseUrl === base) {
+            setTimeout(() => ensureWebSocket(base), 3000);
+        }
+    };
+    
+    ws.onerror = () => { 
+        state.wsConnected = false; 
+    };
+    
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
@@ -2361,16 +2473,10 @@
   }
 
   function setProgress(text) {
-    const prev = state.lastProgressText || '';
+    // const prev = state.lastProgressText || '';
     els.progress.textContent = text;
     state.lastProgressText = text;
-    // 当提示从“生成中，等待结果...”变更为其他内容时，主动尝试刷新一次结果以防漏检
-    if (prev.includes(t('msg_progress_waiting')) && text !== prev) {
-      // 异步触发，避免与当前流程竞争
-      setTimeout(() => {
-        try { onRefreshLastResult(); } catch (e) { console.warn('[setProgress] onRefreshLastResult error', e); }
-      }, 0);
-    }
+    // Removed automatic refresh trigger to avoid infinite loop with onRefreshLastResult
   }
 
   async function uploadImage(base, file) {
@@ -2518,7 +2624,7 @@
     return data?.prompt_id || data?.promptId || data?.id;
   }
 
-  async function pollHistoryForVideo(base, promptId, { timeoutMs = 180000, intervalMs = 1500 } = {}) {
+  async function pollHistoryForVideo(base, promptId, { timeoutMs = 180000, intervalMs = 1500, expectedPrefix = null } = {}) {
     const start = Date.now();
     let attempt = 0;
     while (Date.now() - start < timeoutMs) {
@@ -2537,10 +2643,16 @@
       if (hist) {
         const videos = collectVideosFromHistory(hist);
         if (videos.length > 0) {
-          const pref = state.currentExpectedPrefix || '';
+          const pref = expectedPrefix !== null ? expectedPrefix : (state.currentExpectedPrefix || '');
           let candidates = videos;
           if (pref) {
-            const byPref = videos.filter(v => typeof v.filename === 'string' && v.filename.startsWith(pref));
+            const byPref = videos.filter(v => {
+                if (typeof v.filename !== 'string') return false;
+                // Check basename to handle subfolders in filename
+                const parts = v.filename.split(/[/\\]/);
+                const basename = parts[parts.length - 1];
+                return basename.startsWith(pref);
+            });
             if (byPref.length > 0) candidates = byPref;
           }
           candidates.sort((a, b) => (b.ts || 0) - (a.ts || 0));
@@ -2710,7 +2822,12 @@
     } catch {
       return null;
     }
-    const list = all.filter(v => typeof v.filename === 'string' && v.filename.startsWith(prefix));
+    const list = all.filter(v => {
+        if (typeof v.filename !== 'string') return false;
+        const parts = v.filename.split(/[/\\]/);
+        const basename = parts[parts.length - 1];
+        return basename.startsWith(prefix);
+    });
     if (!list.length) return null;
     list.sort((a, b) => {
       const ta = a.ts || 0, tb = b.ts || 0;
@@ -2875,10 +2992,10 @@
                           // File
                           if (/\.(mp4|gif|webm)$/i.test(name)) {
                               let finalName = name;
-                              // Ensure full path prefix relative to output
-                              if (!name.includes('/') && !name.includes('\\')) {
-                                  finalName = normPath + '/' + name;
-                              }
+                              // Don't prepend path, let subfolder handle it to match history format and avoid duplicates
+                              // if (!name.includes('/') && !name.includes('\\')) {
+                              //    finalName = normPath + '/' + name;
+                              // }
                               
                               allFiles.push({
                                   filename: finalName,
@@ -2904,4 +3021,4 @@
 
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 })();
-})();
+
