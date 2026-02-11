@@ -159,6 +159,38 @@
         </div>
     </div>
 
+    <div id="quickAddModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content large">
+            <h3 data-i18n="modal_quick_add_title">快捷添加图片</h3>
+            <div class="quick-add-body">
+                <div class="qa-left">
+                    <div id="qaUploadArea" class="upload-area">
+                        <span class="plus">+</span>
+                        <p data-i18n="qa_upload_hint">点击或拖拽上传图片</p>
+                        <p class="sub-hint">支持 JPG/PNG/GIF</p>
+                        <input type="file" id="qaFileInput" accept="image/jpeg,image/png,image/gif" style="display:none" />
+                    </div>
+                    <div id="qaCanvasContainer" class="canvas-container hidden">
+                        <canvas id="qaCanvas"></canvas>
+                        <div class="crop-hint" data-i18n="qa_crop_hint">拖拽调整裁切范围 (固定 3:4)</div>
+                    </div>
+                </div>
+                <div class="qa-right">
+                    <div class="form-group">
+                        <label data-i18n="qa_prompt_label">提示词 (必填)</label>
+                        <textarea id="qaPromptInput" rows="5" maxlength="500" placeholder="描述你想让图片动起来的效果..."></textarea>
+                        <div class="char-count"><span id="qaCharCount">0</span>/500</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="qaCancelBtn" data-i18n="btn_cancel">取消</button>
+                <button id="qaConfirmBtn" class="primary" data-i18n="btn_confirm">确定</button>
+            </div>
+        </div>
+    </div>
+
     <div id="photoFrameContainer" class="photo-frame hidden">
         <div id="pfLayer1" class="pf-layer"></div>
         <div id="pfLayer2" class="pf-layer"></div>
@@ -166,7 +198,9 @@
             <div class="time"></div>
             <div class="date"></div>
         </div>
-        <button id="pfExitBtn" class="pf-exit-btn" title="退出相框模式">×</button>
+        <button id="pfAddBtn" class="pf-add-btn pf-ui-element" title="添加图片">+</button>
+        <button id="pfExitBtn" class="pf-exit-btn pf-ui-element" title="退出相框模式">×</button>
+        <div id="pfTriggerArea" class="pf-trigger-area" title="Show Controls"></div>
     </div>
 
     <script src="i18n.js"></script>

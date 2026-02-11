@@ -50,6 +50,18 @@
     photoFrameContainer: document.getElementById('photoFrameContainer'),
     pfClock: document.getElementById('pfClock'),
     pfExitBtn: document.getElementById('pfExitBtn'),
+    pfAddBtn: document.getElementById('pfAddBtn'),
+    pfTriggerArea: document.getElementById('pfTriggerArea'),
+    // Quick Add Modal
+    quickAddModal: document.getElementById('quickAddModal'),
+    qaUploadArea: document.getElementById('qaUploadArea'),
+    qaFileInput: document.getElementById('qaFileInput'),
+    qaCanvasContainer: document.getElementById('qaCanvasContainer'),
+    qaCanvas: document.getElementById('qaCanvas'),
+    qaPromptInput: document.getElementById('qaPromptInput'),
+    qaCharCount: document.getElementById('qaCharCount'),
+    qaCancelBtn: document.getElementById('qaCancelBtn'),
+    qaConfirmBtn: document.getElementById('qaConfirmBtn'),
     // Language
     langToggleBtn: document.getElementById('langToggleBtn'),
     triggerFileBtn: document.getElementById('triggerFileBtn'),
@@ -131,6 +143,18 @@
       dragMode: null,
       lastMouse: { x: 0, y: 0 },
     },
+    // Quick Add state
+    quickAdd: {
+        active: false,
+        file: null,
+        img: null,
+        scale: 1,
+        offX: 0,
+        offY: 0,
+        box: { x: 0, y: 0, w: 0, h: 0 },
+        dragMode: null,
+        lastMouse: { x: 0, y: 0 },
+    }
   };
 
   // Init
@@ -242,6 +266,21 @@
     if (els.pfAutoGenerate) els.pfAutoGenerate.addEventListener('change', savePhotoFrameConfig);
     if (els.pfMaxVideos) els.pfMaxVideos.addEventListener('change', savePhotoFrameConfig);
     if (els.pfClearVideosBtn) els.pfClearVideosBtn.addEventListener('click', clearAllVideosState);
+    if (els.pfAddBtn) els.pfAddBtn.addEventListener('click', (e) => { e.stopPropagation(); openQuickAddModal(); });
+    if (els.pfTriggerArea) els.pfTriggerArea.addEventListener('mouseenter', () => smartUI.onTriggerHover());
+
+    // Quick Add Modal Events
+    if (els.qaCancelBtn) els.qaCancelBtn.addEventListener('click', closeQuickAddModal);
+    if (els.qaConfirmBtn) els.qaConfirmBtn.addEventListener('click', onQaConfirm);
+    if (els.qaUploadArea) {
+        els.qaUploadArea.addEventListener('click', () => els.qaFileInput && els.qaFileInput.click());
+        els.qaUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); els.qaUploadArea.classList.add('drag-over'); });
+        els.qaUploadArea.addEventListener('dragleave', (e) => { e.preventDefault(); els.qaUploadArea.classList.remove('drag-over'); });
+        els.qaUploadArea.addEventListener('drop', onQaDrop);
+    }
+    if (els.qaFileInput) els.qaFileInput.addEventListener('change', onQaFileSelected);
+    if (els.qaPromptInput) els.qaPromptInput.addEventListener('input', updateQaCharCount);
+    initQaCanvasEvents();
 
     // Cropper
     if (els.cropCancelBtn) els.cropCancelBtn.addEventListener('click', onCropCancel);
@@ -260,12 +299,20 @@
         });
     }
 
-    // Listen for ESC to exit photo frame
+    // Listen for ESC to exit photo frame or close modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        // Prioritize closing modals
+        if (state.quickAdd.active) {
+            closeQuickAddModal();
+            return;
+        }
+        if (!els.promptModal.classList.contains('hidden')) {
+            closePromptModal();
+            return;
+        }
+        // Then exit photo frame
         if (state.photoFrame.active) stopPhotoFrame();
-        // Also close modals if open
-        if (!els.promptModal.classList.contains('hidden')) closePromptModal();
       }
     });
   }
@@ -359,10 +406,130 @@
     }
   }
 
+  // --- Smart UI Logic ---
+  const smartUI = {
+      config: {
+          hideDelay: 3000,
+          animDuration: 500
+      },
+      timer: null,
+      isVisible: true,
+      lastTapTime: 0,
+      
+      init() {
+          // Bind events to container
+          const container = els.photoFrameContainer;
+          
+          container.addEventListener('mousemove', () => this.onMouseMove());
+          
+          // Touch handling for mobile double tap
+          container.addEventListener('touchstart', (e) => {
+              // If touching a button, don't mess with it
+              if (e.target.closest('button')) return;
+              this.onTouchStart(e);
+          }, { passive: true });
+          
+          // Initial state
+          this.show();
+      },
+      
+      start() {
+          this.show();
+      },
+      
+      stop() {
+          this.clearTimer();
+          this.showButtons(); // Restore visibility
+      },
+      
+      clearTimer() {
+          if (this.timer) {
+              clearTimeout(this.timer);
+              this.timer = null;
+          }
+      },
+      
+      show() {
+          this.isVisible = true;
+          this.showButtons();
+          this.resetHideTimer();
+      },
+      
+      hide() {
+          // Don't hide if modals are open
+          if (state.quickAdd.active || (els.promptModal && !els.promptModal.classList.contains('hidden'))) return;
+          
+          this.isVisible = false;
+          this.hideButtons();
+          this.clearTimer();
+      },
+      
+      resetHideTimer() {
+          this.clearTimer();
+          this.timer = setTimeout(() => {
+              this.hide();
+          }, this.config.hideDelay);
+      },
+      
+      onInteraction() {
+          if (!this.isVisible) {
+              this.show();
+          } else {
+              this.resetHideTimer();
+          }
+      },
+      
+      onMouseMove() {
+          // Desktop: show on move
+          // Simple check for touch device? No, just rely on mousemove firing.
+          // However, some touch devices fire mousemove.
+          // We can't easily distinguish 100%, but generally fine.
+          // If we want to strictly follow "double tap on mobile", we should ignore mousemove if it's a touch event?
+          // Browsers handle this differently.
+          // For now, let's allow mousemove to show UI.
+          this.onInteraction();
+      },
+      
+      onTouchStart(e) {
+          const now = Date.now();
+          if (now - this.lastTapTime < 300) {
+              // Double tap
+              this.onDoubleTap();
+          } else {
+             // Single tap logic is handled by click event (next photo)
+             // But if UI is visible, we should keep it visible?
+             if (this.isVisible) this.resetHideTimer();
+          }
+          this.lastTapTime = now;
+      },
+      
+      onDoubleTap() {
+          this.show();
+      },
+      
+      onTriggerHover() {
+          this.show();
+      },
+      
+      showButtons() {
+          if (els.pfAddBtn) els.pfAddBtn.classList.remove('pf-ui-hidden');
+          if (els.pfExitBtn) els.pfExitBtn.classList.remove('pf-ui-hidden');
+          // Maybe hide trigger area? No, let it be.
+      },
+      
+      hideButtons() {
+          if (els.pfAddBtn) els.pfAddBtn.classList.add('pf-ui-hidden');
+          if (els.pfExitBtn) els.pfExitBtn.classList.add('pf-ui-hidden');
+      }
+  };
+
   // --- Photo Frame Mode ---
 
   // Interaction: Click or ArrowRight to skip to next
   function initPhotoFrameInteraction() {
+      // Initialize Smart UI events
+      smartUI.init();
+
       // Click on container to next
       els.photoFrameContainer.addEventListener('click', (e) => {
           if (e.target === els.pfExitBtn) return; // Ignore exit button
@@ -540,6 +707,9 @@
     // Start slideshow
     state.photoFrame.mode = 'photo';
     runPhotoFrameLoop();
+
+    // Start Smart UI
+    smartUI.start();
 
     // Sync history to find existing videos
     syncVideosFromHistory();
@@ -741,6 +911,9 @@
     if (document.exitFullscreen && document.fullscreenElement) {
       document.exitFullscreen();
     }
+    
+    // Stop Smart UI
+    smartUI.stop();
   }
 
   function updateClockVisibility() {
@@ -798,12 +971,12 @@
         // Immediately clear the flag to prevent it from sticking if timer is cancelled (e.g. manual skip)
         state.images[forceIdx].forcePlayVideo = false;
     } 
-    // 2. 否则，尝试提高“有视频图片”的选中概率 (70% 概率优先从有视频的集合中选)
+    // 2. 否则，尝试提高“有视频图片”的选中概率 (30% 概率优先从有视频的集合中选)
     else {
         const withVideoIndices = state.images.map((img, i) => ((img.videoUrls && img.videoUrls.length > 0) || img.videoUrl) ? i : -1).filter(i => i !== -1);
         
-        // 只有当存在有视频的图片，且随机数命中 70% 概率，且不仅仅只有当前这一张（避免死循环重复）时
-        if (withVideoIndices.length > 0 && Math.random() < 0.7) {
+        // 只有当存在有视频的图片，且随机数命中 30% 概率，且不仅仅只有当前这一张（避免死循环重复）时
+        if (withVideoIndices.length > 0 && Math.random() < 0.3) {
              // 尝试选一个非当前的
              const candidates = withVideoIndices.filter(i => i !== state.photoFrame.currentIndex);
              if (candidates.length > 0) {
@@ -3020,5 +3193,326 @@
   }
 
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+  // --- Quick Add Modal Logic ---
+
+  function openQuickAddModal() {
+      // Reset State
+      state.quickAdd.active = true;
+      state.quickAdd.file = null;
+      state.quickAdd.img = null;
+      
+      // Reset UI
+      els.qaFileInput.value = '';
+      els.qaPromptInput.value = '';
+      updateQaCharCount();
+      
+      els.qaUploadArea.classList.remove('hidden');
+      els.qaCanvasContainer.classList.add('hidden');
+      
+      els.quickAddModal.classList.remove('hidden');
+  }
+
+  function closeQuickAddModal() {
+      state.quickAdd.active = false;
+      els.quickAddModal.classList.add('hidden');
+  }
+
+  function onQaDrop(e) {
+      e.preventDefault();
+      els.qaUploadArea.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+          handleQaFile(files[0]);
+      }
+  }
+
+  function onQaFileSelected(e) {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+          handleQaFile(files[0]);
+      }
+  }
+
+  function handleQaFile(file) {
+      if (!file.type.match('image.*')) {
+          alert(t('msg_image_load_fail') || 'Please select an image file');
+          return;
+      }
+      state.quickAdd.file = file;
+      loadQaImage(file);
+  }
+
+  function loadQaImage(file) {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+          state.quickAdd.img = img;
+          els.qaUploadArea.classList.add('hidden');
+          els.qaCanvasContainer.classList.remove('hidden');
+          initQaCropper(img);
+          URL.revokeObjectURL(url);
+      };
+      img.onerror = () => {
+          alert(t('msg_image_load_fail'));
+          URL.revokeObjectURL(url);
+      };
+      img.src = url;
+  }
+
+  function initQaCropper(img) {
+      const cvs = els.qaCanvas;
+      const container = els.qaCanvasContainer;
+      
+      // Resize canvas to container
+      cvs.width = container.clientWidth;
+      cvs.height = container.clientHeight;
+      
+      // Calc initial fit
+      const cw = cvs.width;
+      const ch = cvs.height;
+      const iw = img.width;
+      const ih = img.height;
+      
+      // Scale image to fit canvas with padding
+      const scale = Math.min((cw - 20) / iw, (ch - 20) / ih);
+      state.quickAdd.scale = scale;
+      state.quickAdd.offX = (cw - iw * scale) / 2;
+      state.quickAdd.offY = (ch - ih * scale) / 2;
+      
+      // Init Crop Box (3:4)
+      let bw = iw * scale;
+      let bh = bw / 0.75; // 3:4 ratio => w/h = 0.75 => h = w/0.75
+      if (bh > ih * scale) {
+          bh = ih * scale;
+          bw = bh * 0.75;
+      }
+      
+      // Center box
+      state.quickAdd.box = {
+          x: state.quickAdd.offX + (iw * scale - bw) / 2,
+          y: state.quickAdd.offY + (ih * scale - bh) / 2,
+          w: bw,
+          h: bh
+      };
+      
+      requestAnimationFrame(drawQaCanvas);
+  }
+
+  function drawQaCanvas() {
+      if (!state.quickAdd.active || !state.quickAdd.img) return;
+      
+      const ctx = els.qaCanvas.getContext('2d');
+      const cvs = els.qaCanvas;
+      const { img, offX, offY, scale, box } = state.quickAdd;
+      
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+      
+      // Draw Image
+      ctx.drawImage(img, offX, offY, img.width * scale, img.height * scale);
+      
+      // Draw Overlay (darken outside box)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      // Top
+      ctx.fillRect(0, 0, cvs.width, box.y);
+      // Bottom
+      ctx.fillRect(0, box.y + box.h, cvs.width, cvs.height - (box.y + box.h));
+      // Left
+      ctx.fillRect(0, box.y, box.x, box.h);
+      // Right
+      ctx.fillRect(box.x + box.w, box.y, cvs.width - (box.x + box.w), box.h);
+      
+      // Draw Box Border
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(box.x, box.y, box.w, box.h);
+      
+      // Draw 3x3 Grid
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1;
+      // Verticals
+      ctx.moveTo(box.x + box.w / 3, box.y); ctx.lineTo(box.x + box.w / 3, box.y + box.h);
+      ctx.moveTo(box.x + 2 * box.w / 3, box.y); ctx.lineTo(box.x + 2 * box.w / 3, box.y + box.h);
+      // Horizontals
+      ctx.moveTo(box.x, box.y + box.h / 3); ctx.lineTo(box.x + box.w, box.y + box.h / 3);
+      ctx.moveTo(box.x, box.y + 2 * box.h / 3); ctx.lineTo(box.x + box.w, box.y + 2 * box.h / 3);
+      ctx.stroke();
+  }
+
+  function initQaCanvasEvents() {
+      const cvs = els.qaCanvas;
+      
+      cvs.addEventListener('mousedown', e => {
+          if (!state.quickAdd.img) return;
+          const rect = cvs.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          const { box } = state.quickAdd;
+          
+          if (mx >= box.x && mx <= box.x + box.w && my >= box.y && my <= box.y + box.h) {
+              state.quickAdd.dragMode = 'move';
+              state.quickAdd.lastMouse = { x: mx, y: my };
+          }
+      });
+      
+      window.addEventListener('mousemove', e => {
+          if (!state.quickAdd.active || !state.quickAdd.dragMode) return;
+          
+          // Re-calculate mouse pos relative to canvas
+          // Note: window mousemove gives clientX/Y, we need to map to canvas
+          const rect = cvs.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          
+          const dx = mx - state.quickAdd.lastMouse.x;
+          const dy = my - state.quickAdd.lastMouse.y;
+          
+          if (state.quickAdd.dragMode === 'move') {
+              const { box, offX, offY, scale, img } = state.quickAdd;
+              
+              const imgX = offX;
+              const imgY = offY;
+              const imgW = img.width * scale;
+              const imgH = img.height * scale;
+              
+              let newX = box.x + dx;
+              let newY = box.y + dy;
+              
+              // Clamp
+              if (newX < imgX) newX = imgX;
+              if (newY < imgY) newY = imgY;
+              if (newX + box.w > imgX + imgW) newX = imgX + imgW - box.w;
+              if (newY + box.h > imgY + imgH) newY = imgY + imgH - box.h;
+              
+              state.quickAdd.box.x = newX;
+              state.quickAdd.box.y = newY;
+          }
+          
+          state.quickAdd.lastMouse = { x: mx, y: my };
+          requestAnimationFrame(drawQaCanvas);
+      });
+      
+      window.addEventListener('mouseup', () => {
+          state.quickAdd.dragMode = null;
+      });
+      
+      cvs.addEventListener('wheel', e => {
+          if (!state.quickAdd.img) return;
+          e.preventDefault();
+          
+          const { box, offX, offY, scale, img } = state.quickAdd;
+          const zoom = e.deltaY > 0 ? 0.95 : 1.05;
+          
+          let newW = box.w * zoom;
+          let newH = newW / 0.75;
+          
+          const imgW = img.width * scale;
+          const imgH = img.height * scale;
+          
+          // Check max size
+          if (newW > imgW) { newW = imgW; newH = newW / 0.75; }
+          if (newH > imgH) { newH = imgH; newW = newH * 0.75; }
+          
+          // Check min size (visual min)
+          if (newW < 50) { newW = 50; newH = newW / 0.75; }
+          
+          // Center zoom
+          const cx = box.x + box.w / 2;
+          const cy = box.y + box.h / 2;
+          
+          let newX = cx - newW / 2;
+          let newY = cy - newH / 2;
+          
+          // Clamp
+          const imgX = offX;
+          const imgY = offY;
+          if (newX < imgX) newX = imgX;
+          if (newY < imgY) newY = imgY;
+          if (newX + newW > imgX + imgW) newX = imgX + imgW - newW;
+          if (newY + newH > imgY + imgH) newY = imgY + imgH - newH;
+          
+          state.quickAdd.box = { x: newX, y: newY, w: newW, h: newH };
+          requestAnimationFrame(drawQaCanvas);
+      });
+  }
+
+  function updateQaCharCount() {
+      const len = els.qaPromptInput.value.length;
+      els.qaCharCount.textContent = len;
+  }
+
+  function onQaConfirm() {
+      if (!state.quickAdd.img) {
+          alert(t('msg_alert_add_image') || 'Please add an image first');
+          return;
+      }
+      
+      const promptText = els.qaPromptInput.value.trim();
+      if (!promptText) {
+          alert(t('msg_alert_prompt_required') || 'Please enter prompt text');
+          return;
+      }
+      
+      // Perform Crop
+      const { img, box, offX, offY, scale } = state.quickAdd;
+      
+      // Calculate source coords
+      const sx = (box.x - offX) / scale;
+      const sy = (box.y - offY) / scale;
+      const sw = box.w / scale;
+      const sh = box.h / scale;
+      
+      // Validate Min Size (300x400)
+      if (sw < 300 || sh < 400) {
+           // Maybe warn but allow? Or strictly block?
+           // User req: "Min 300x400px".
+           // But user is zooming a box on screen, they don't know the pixels.
+           // We should probably check this during zoom/resize interaction, but doing it here is safer.
+           // Actually, let's just warn if it's too small, but since it's client side crop, we can just upscale or let it be.
+           // Let's enforce it strictly?
+           if (sw < 300 || sh < 400) {
+               alert(`Selection too small. Minimum 300x400. Current: ${Math.round(sw)}x${Math.round(sh)}`);
+               return;
+           }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      
+      canvas.toBlob(blob => {
+          const newFile = new File([blob], state.quickAdd.file.name, { type: state.quickAdd.file.type, lastModified: Date.now() });
+          
+          // Add to system
+          const reader = new FileReader();
+          reader.onload = () => {
+              state.images.push({
+                  id: Math.random().toString(36).slice(2),
+                  file: newFile,
+                  name: newFile.name,
+                  url: reader.result,
+                  prompts: [promptText],
+                  forcePlayVideo: false // New image, no video yet
+              });
+              
+              // Refresh thumbs in main view
+              renderThumbs();
+              enableGenerateIfReady();
+              
+              // Close Modal
+              closeQuickAddModal();
+              showToast(t('msg_add_success') || 'Added successfully', 'success');
+              
+              // Since we are in Photo Frame mode, the new image is now part of state.images
+              // The next pickNextPhoto() will consider it.
+          };
+          reader.readAsDataURL(newFile);
+          
+      }, state.quickAdd.file.type);
+  }
+
 })();
 
