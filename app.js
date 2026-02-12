@@ -14,12 +14,12 @@
     exportWorkflowBtn: document.getElementById('exportWorkflowBtn'),
     importWorkflowInput: document.getElementById('importWorkflowInput'),
     syncHistoryBtn: document.getElementById('syncHistoryBtn'),
-    diagnoseBtn: document.getElementById('diagnoseBtn'),
     diagnostics: document.getElementById('diagnostics'),
     // Save/Load List
     saveListBtn: document.getElementById('saveListBtn'),
     loadListBtn: document.getElementById('loadListBtn'),
     loadListInput: document.getElementById('loadListInput'),
+    saveLoadConfigCheck: document.getElementById('saveLoadConfigCheck'),
     // Workflow Actions
     setDefaultWorkflowBtn: document.getElementById('setDefaultWorkflowBtn'),
     // Photo Frame Config
@@ -219,7 +219,8 @@
         }
     });
 
-    if (els.diagnoseBtn) els.diagnoseBtn.addEventListener('click', diagnoseServer);
+    // Merged Check/Diagnose Button
+    if (els.checkServerBtn) els.checkServerBtn.addEventListener('click', checkServer);
     
     if (els.syncHistoryBtn) {
         els.syncHistoryBtn.addEventListener('click', async () => {
@@ -1599,69 +1600,58 @@
     const base = getBase();
     if (!base) return;
     setStatus(t('msg_checking'), 'muted');
-    try {
-      // system_stats is a lightweight endpoint
-      const r = await fetch(base + '/system_stats');
-      if (!r.ok) {
-        setStatus(`${t('msg_service_unavailable')} (HTTP ${r.status})`, 'err');
-        const text = await safeReadText(r);
-        showDiagnostics({ ok:false, status:r.status, text });
-        return;
-      }
-      const data = await r.json();
-      setStatus(t('msg_connected') + ': ' + (data?.system?.platform || 'ComfyUI'), 'ok');
-      showDiagnostics({ ok:true, status:200, data });
-      enableGenerateIfReady();
-    } catch (err) {
-      console.error(err);
-      const msg = (err?.message || '').toLowerCase();
-      const maybeCors = msg.includes('failed to fetch') || msg.includes('cors');
-      const hint = maybeCors ? ' (CORS?)' : '';
-      setStatus(`${t('msg_connect_failed')}: ` + (err?.message || 'Unknown') + hint, 'err');
-      showDiagnostics({ ok:false, error: err?.message || String(err), cors: maybeCors });
-    }
-  }
-
-  async function diagnoseServer() {
-    const base = getBase();
-    if (!base) return;
-    setStatus(t('msg_diagnosing'), 'muted');
     els.diagnostics && (els.diagnostics.textContent = '');
+    
     try {
       const t0 = performance.now();
-      const r = await fetch(base + '/system_stats');
+      // Parallel fetch system_stats and browser config (diagnose logic)
+      const [r, b] = await Promise.all([
+          fetch(base + '/system_stats').catch(e => ({ ok: false, error: e })),
+          fetch(base + '/browser/config?_=' + Date.now()).catch(e => ({ ok: false, status: 404, error: e }))
+      ]);
+      
       const latency = Math.round(performance.now() - t0);
-      
-      // Check ComfyUI-Browser
+
+      // Analyze Browser Status
       let browserStatus = 'unknown';
-      try {
-          // Add random param to avoid cache
-          const b = await fetch(base + '/browser/config?_=' + Date.now()); 
-          if (b.ok) browserStatus = 'installed';
-          else if (b.status === 404) browserStatus = 'not_installed';
-          else browserStatus = 'error_' + b.status;
-      } catch (e) { 
-          browserStatus = 'connect_fail'; 
-          console.warn('[Diagnose] Browser check fail', e);
-      }
-      
+      if (b.ok) browserStatus = 'installed';
+      else if (b.status === 404) browserStatus = 'not_installed';
+      else browserStatus = 'error_' + (b.status || 'connect');
+
+      // Analyze System Stats
       if (!r.ok) {
-        const text = await safeReadText(r);
-        setStatus(`${t('msg_service_unavailable')} (HTTP ${r.status})`, 'err');
-        showDiagnostics({ ok:false, status:r.status, text, latency, browserStatus });
+        // Fetch failed
+        const err = r.error || new Error(`HTTP ${r.status}`);
+        const msg = (err.message || '').toLowerCase();
+        const maybeCors = msg.includes('failed to fetch') || msg.includes('cors');
+        const hint = maybeCors ? ' (CORS?)' : '';
+        
+        setStatus(`${t('msg_connect_failed')}: ` + (err.message || 'Unknown') + hint, 'err');
+        showDiagnostics({ ok:false, error: err.message || String(err), cors: maybeCors, latency, browserStatus });
         return;
       }
+      
       const data = await r.json();
-      setStatus(t('msg_diagnose_success'), 'ok');
+      const platform = data?.system?.platform || 'ComfyUI';
+      
+      setStatus(`${t('msg_connected')}: ${platform} (${latency}ms)`, 'ok');
       showDiagnostics({ ok:true, status:200, data, latency, browserStatus });
+      enableGenerateIfReady();
+      
+      // If browser is not installed, show a warning in diagnostics even if connected
+      if (browserStatus !== 'installed') {
+          const diagText = els.diagnostics.textContent;
+          els.diagnostics.textContent = diagText + ' | ⚠️ ComfyUI-Browser not detected';
+      }
+
     } catch (err) {
-      const msg = (err?.message || '').toLowerCase();
-      const maybeCors = msg.includes('failed to fetch') || msg.includes('cors');
-      setStatus(`${t('msg_diagnose_failed')}: ` + (err?.message || 'Unknown') + (maybeCors ? ' (CORS?)' : ''), 'err');
-      showDiagnostics({ ok:false, error: err?.message || String(err), cors: maybeCors });
+      console.error(err);
+      setStatus(`${t('msg_connect_failed')}: ` + (err?.message || 'Unknown'), 'err');
+      showDiagnostics({ ok:false, error: err?.message || String(err) });
     }
   }
 
+  // Removed separate diagnoseServer function
   async function safeReadText(r) {
     try { return await r.text(); } catch { return ''; }
   }
@@ -1758,6 +1748,8 @@
     els.saveListBtn.textContent = t('msg_compressing');
 
     try {
+      const includeConfig = els.saveLoadConfigCheck && els.saveLoadConfigCheck.checked;
+      
       const list = [];
       const total = state.images.length;
 
@@ -1777,15 +1769,29 @@
         list.push({
           name: newName,
           url: compressedUrl,
-          prompts: img.prompts || [] // Save prompts
+          prompts: img.prompts || [], // Save prompts
+          videoUrl: img.videoUrl || null,
+          videoUrls: img.videoUrls || []
         });
       }
+      
+      const data = {
+          version: 1,
+          type: 'magic_photo_frame_list',
+          timestamp: Date.now(),
+          images: list
+      };
+      
+      if (includeConfig) {
+          data.workflow = els.workflowJson.value;
+          data.photoFrameConfig = state.photoFrame.config;
+      }
 
-      const blob = new Blob([JSON.stringify(list)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'magic_photo_frame_list.json';
+      a.download = `magic_list_${Date.now()}.mpf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -1841,13 +1847,57 @@
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const list = JSON.parse(ev.target.result);
-        if (!Array.isArray(list)) {
-             // Check if it looks like a workflow to give a better hint
-             if (list.nodes || list['1'] || list.last_node_id) {
-                 throw new Error(t('msg_format_error') + ': ' + t('hint_not_workflow'));
-             }
-             throw new Error(t('msg_format_error'));
+        const raw = JSON.parse(ev.target.result);
+        
+        let list = [];
+        let config = null;
+        let workflow = null;
+        
+        // Detect format: old array or new object
+        if (Array.isArray(raw)) {
+            list = raw;
+        } else if (raw.type === 'magic_photo_frame_list' && Array.isArray(raw.images)) {
+            list = raw.images;
+            config = raw.photoFrameConfig;
+            workflow = raw.workflow;
+        } else if (raw.nodes || raw['1'] || raw.last_node_id) {
+             throw new Error(t('msg_format_error') + ': ' + t('hint_not_workflow'));
+        } else {
+             // Fallback: try to treat as simple object if it has images property?
+             if (Array.isArray(raw.images)) list = raw.images;
+             else throw new Error(t('msg_format_error'));
+        }
+        
+        // Load Config if present and checkbox checked (or always load if present? 
+        // User asked to "allow save/load config". 
+        // Usually load should ask, but let's check the checkbox state for load too?
+        // Or just load if it exists? 
+        // "增加选择，默认情况下允许在保存和加载列表时同时保存当然工作流和相框模式的设置参数"
+        // Implies the checkbox controls both save and load behavior.
+        const shouldLoadConfig = els.saveLoadConfigCheck && els.saveLoadConfigCheck.checked;
+        
+        if (shouldLoadConfig) {
+            if (workflow) {
+                els.workflowJson.value = workflow;
+                updateDefaultButtonState();
+            }
+            if (config) {
+                Object.assign(state.photoFrame.config, config);
+                // Update UI inputs
+                if (els.pfPhotoDuration) els.pfPhotoDuration.value = state.photoFrame.config.photoDuration / 1000;
+                if (els.pfVideoProb) els.pfVideoProb.value = (state.photoFrame.config.baseVideoProbability * 100).toFixed(0);
+                if (els.pfVideoScale) els.pfVideoScale.value = state.photoFrame.config.videoScaleLength || 240;
+                if (els.pfLoopCount) els.pfLoopCount.value = state.photoFrame.config.videoLoopCount;
+                if (els.pfTransDuration) els.pfTransDuration.value = state.photoFrame.config.transitionDuration;
+                if (els.pfBgMusic) els.pfBgMusic.value = state.photoFrame.config.bgMusicUrl || '';
+                if (els.pfDefaultPrompts) els.pfDefaultPrompts.value = (state.photoFrame.config.defaultPrompts || []).join('\n');
+                if (els.pfShowClock) els.pfShowClock.checked = state.photoFrame.config.showClock !== false;
+                if (els.pfAutoGenerate) els.pfAutoGenerate.checked = state.photoFrame.config.autoGenerate !== false;
+                if (els.pfMaxVideos) els.pfMaxVideos.value = state.photoFrame.config.maxVideosPerImage ?? 5;
+                
+                // Trigger save to local storage
+                savePhotoFrameConfig();
+            }
         }
         
         // Clear current list before loading new one
@@ -1867,13 +1917,15 @@
               name: item.name,
               url: item.url,
               prompts: item.prompts || [], // Load prompts
-              videoUrl: item.videoUrl || null // Load videoUrl
+              videoUrl: item.videoUrl || null, // Load videoUrl
+              videoUrls: item.videoUrls || []
             });
           }
         }
         renderThumbs();
         enableGenerateIfReady();
         els.loadListInput.value = ''; // reset
+        alert(t('msg_load_success') || 'Loaded successfully');
       } catch (err) {
         alert(`${t('msg_file_format_error')}: ${err.message}`);
         console.error(err);
@@ -3454,6 +3506,13 @@
           return;
       }
       
+      // Split into multiple prompts by newline
+      const prompts = promptText.split('\n').map(s => s.trim()).filter(Boolean);
+      if (prompts.length === 0) {
+          alert(t('msg_alert_prompt_required') || 'Please enter prompt text');
+          return;
+      }
+      
       // Perform Crop
       const { img, box, offX, offY, scale } = state.quickAdd;
       
@@ -3494,7 +3553,7 @@
                   file: newFile,
                   name: newFile.name,
                   url: reader.result,
-                  prompts: [promptText],
+                  prompts: prompts, // Use split prompts
                   forcePlayVideo: false // New image, no video yet
               });
               

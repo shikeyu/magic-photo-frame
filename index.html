@@ -14,13 +14,18 @@
         <small class="slogan" data-i18n="slogan">让回忆动起来 ✨</small>
       </div>
       <div class="server-config">
-        <button id="langToggleBtn" class="small-btn" style="margin-right: 10px;">EN</button>
-        <label for="serverUrl" data-i18n="label_server_url">ComfyUI 服务地址</label>
-        <input id="serverUrl" type="text" data-i18n-ph="ph_server_url" placeholder="例如：http://127.0.0.1:8188" />
-        <button id="checkServerBtn" data-i18n="btn_check_server">连接检测</button>
-        <button id="diagnoseBtn" data-i18n="btn_diagnose">诊断</button>
-        <span id="serverStatus" class="status" data-i18n="status_unchecked">未检测</span>
-        <div id="diagnostics" class="hint" style="width:100%"></div>
+        <div class="server-config-row">
+            <button id="langToggleBtn" class="small-btn">EN</button>
+            <label for="serverUrl" data-i18n="label_server_url" style="white-space:nowrap;">ComfyUI 服务地址</label>
+            <input id="serverUrl" type="text" data-i18n-ph="ph_server_url" placeholder="例如：http://127.0.0.1:8188" />
+        </div>
+        <div class="server-config-row">
+            <button id="checkServerBtn" data-i18n="btn_check_server">连接检测</button>
+        </div>
+        <div class="server-config-row">
+            <span id="serverStatus" class="status" data-i18n="status_unchecked">未检测</span>
+        </div>
+        <div id="diagnostics" class="hint" style="width:100%; text-align: right;"></div>
       </div>
     </header>
 
@@ -45,11 +50,15 @@
 
       <section class="uploader">
         <h2 data-i18n="section_add_file">添加文件</h2>
-        <div class="list-actions" style="margin-bottom: 10px; display: flex; gap: 8px;">
-        <button id="saveListBtn" data-i18n="btn_save_list">保存列表</button>
-        <button id="loadListBtn" data-i18n="btn_load_list">加载列表</button>
-        <input type="file" id="loadListInput" accept=".json" style="display: none;" />
-      </div>
+        <div class="list-actions" style="margin-bottom: 10px; display: flex; gap: 8px; align-items: center;">
+        <button id="saveListBtn" data-i18n="btn_save_list" class="primary-btn-outline">保存列表</button>
+        <button id="loadListBtn" data-i18n="btn_load_list" class="primary-btn-outline">加载列表</button>
+        <input type="file" id="loadListInput" accept=".json,.mpf" style="display: none;" />
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer;">
+            <input type="checkbox" id="saveLoadConfigCheck" checked>
+            <span data-i18n="lbl_save_load_config">包含工作流与设置</span>
+        </label>
+    </div>
         <input id="imageInput" type="file" accept="image/*" multiple style="display: none;" />
         <button id="triggerFileBtn" class="primary-btn" style="width: 100%; margin-bottom: 8px;" data-i18n="btn_select_files">选择文件</button>
         <div id="imagePreview" class="preview"></div>
@@ -168,7 +177,7 @@
                     <div id="qaUploadArea" class="upload-area">
                         <span class="plus">+</span>
                         <p data-i18n="qa_upload_hint">点击或拖拽上传图片</p>
-                        <p class="sub-hint">支持 JPG/PNG/GIF</p>
+                        <p class="sub-hint" data-i18n="qa_upload_sub_hint">支持 JPG/PNG/GIF</p>
                         <input type="file" id="qaFileInput" accept="image/jpeg,image/png,image/gif" style="display:none" />
                     </div>
                     <div id="qaCanvasContainer" class="canvas-container hidden">
